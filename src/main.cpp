@@ -11,6 +11,8 @@ https://chatgpt.com --> AI-tool
 #include <OneWire.h>                    //Nodig voor temp.sensor DS18B20
 #include <DallasTemperature.h>          //Nodig voor temp.sensor DS18B20
 
+OneWire ds(DS18S20_Pin);
+
 // FUNCTIONS:
 void getBodemvochtValue() {// Leest de analoge waarden van beide bodemvochtigheidssensoren en slaat deze op in globale variabelen
   resSensorValue = analogRead(RES_SOILSENSOR);

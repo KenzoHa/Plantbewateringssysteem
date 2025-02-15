@@ -9,7 +9,6 @@ const int RES_SOILSENSOR = 12;
 const int CAP_SOILSENSOR = 4;
 
 const int DS18S20_Pin = 13;
-OneWire ds(DS18S20_Pin);
 
 const int RELAY_PIN = 14 ; 
 
