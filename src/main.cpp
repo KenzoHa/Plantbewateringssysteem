@@ -2,23 +2,28 @@
 https://canvas.kdg.be/courses/49816/pages/basisstructuur-code-en-configuratie-van-het-plantbewateringssysteem --> basisstructuur code
 https://canvas.kdg.be/courses/49816/pages/bodemvochtigheidssensoren --> voorbeeld 'value-mapping' bodemvochtigheidssensoren
 https://wiki.dfrobot.com/Waterproof_DS18B20_Digital_Temperature_Sensor__SKU_DFR0198_ --> voorbeeld getTemp()-functie voor DS18B20
+https://canvas.kdg.be/courses/49816/pages/coding-debugging-and-tracing?module_item_id=1128459 --> Hoe debugging-libraries gebruiken
+https://www.youtube.com/watch?v=JHMpszgzWSg&t=550s --> ArduinoTrace video-tutorial
+https://www.w3schools.com/cpp/cpp_conditions_shorthand.asp --> Ternary operator (korte schrijfwijze van if-else)
+https://docs.particle.io/reference/device-os/api/time/time/ --> omdat de millis() functie een 'unsigned long' teruggeeft, gebruik ik ook 'unsigned long'. Dit om vergelijk-problemen te voorkomen 
 https://www.perplexity.ai/ --> AI-tool
 https://claude.ai --> AI-tool
 */
+
+#define ARDUINOTRACE_ENABLE 1  // Disable all traces => 0
 
 // Libraries:
 #include <Arduino.h>
 #include <config.h>            //Pin-definities en CONSTANTEN (grenswaarden, timing, statussen, etc.)
 #include <OneWire.h>           //Nodig voor temp.sensor DS18B20
 #include <DallasTemperature.h> //Nodig voor temp.sensor DS18B20
+#include <ArduinoTrace.h>      //debugging-tool/-library
 
-// (Globale) variabelen:
+// Globale variabelen:
 unsigned long LaatsteSensorLezing = 0;
 unsigned long bewateringStartTijd = 0;
-unsigned long knopStartTijd = 0;
-
-int huidigeBewatering = BEWATERING_UIT;
-int bewateringType = 0;
+unsigned long pompDuur = 0;
+int pompStatus = POMP_UIT;
 bool knopIngedrukt = false;
 
 OneWire ds(DS18S20_Pin);
@@ -70,44 +75,43 @@ int bepaalBodemvochtStatus(int sensorValue, bool isResistief)// Bepaalt de statu
 
 void printBodemvochtData()// Print de ruwe waarden, percentages en bodemvochtstatus van beide bodemvochtigheidssensoren naar de Serial Monitor
 { 
+  TRACE();
   int resMoisturePercentage = berekenBodemvochtPercentage(resSensorValue, RESISTIEVE_SENSOR_DROOG_INTERVAL_MIN, RESISTIEVE_SENSOR_NAT_INTERVAL_MAX);
   int capMoisturePercentage = berekenBodemvochtPercentage(capSensorValue, CAPACITIEVE_SENSOR_NAT_INTERVAL_MIN, CAPACITIEVE_SENSOR_DROOG_INTERVAL_MAX);
 
   // Print resistieve sensor data
-  Serial.print("Resistance type soil sensor value: ");
-  Serial.print(resSensorValue);
-  Serial.print(" - Soil moisture percentage: ");
-  Serial.print(resMoisturePercentage);
-  Serial.print("% - Status: ");
-
+  DUMP(resSensorValue);
+  DUMP(resMoisturePercentage);
+  
+  const char* resStatusStr;
   if (resBodemStatus == STATUS_DROOG){
-    Serial.println("DROOG");
+    resStatusStr = "DROOG";
   }
   else if (resBodemStatus == STATUS_VOCHTIG){
-    Serial.println("VOCHTIG");
+    resStatusStr = "VOCHTIG";
   }
   else if (resBodemStatus == STATUS_NAT){
-    Serial.println("NAT");
+    resStatusStr = "NAT";
   }
+
+  DUMP(resStatusStr);
+  
 
   // Print capacitieve sensor data
-  Serial.print("Capacitance type soil sensor value: ");
-  Serial.print(capSensorValue);
-  Serial.print(" - Soil moisture percentage: ");
-  Serial.print(capMoisturePercentage);
-  Serial.print("% - Status: ");
-
+  DUMP(capSensorValue);
+  DUMP(capMoisturePercentage);
+  
+  const char* capStatusStr;
   if (capBodemStatus == STATUS_DROOG){
-    Serial.println("DROOG");
+    capStatusStr = "DROOG";
   }
   else if (capBodemStatus == STATUS_VOCHTIG){
-    Serial.println("VOCHTIG");
+    capStatusStr = "VOCHTIG";
   }
   else if (capBodemStatus == STATUS_NAT){
-    Serial.println("NAT");
+    capStatusStr = "NAT";
   }
-
-  Serial.println("----------------");
+  DUMP(capStatusStr);
 }
 
 int bepaalPrioriteit()//Bij niet-overeenkomende status krijgt de capacitieve sensor prioriteit/voorrang want deze meet nauwkeuriger
@@ -128,20 +132,23 @@ float getTemp()// Leest de temperatuur van de DS18B20 sensor en geeft deze terug
   if (!ds.search(addr))
   {
     // no more sensors on chain, reset search
-    Serial.println("no more sensors on chain, reset search!");
+    TRACE();
+    DUMP("no more sensors on chain, reset search!");
     ds.reset_search();
     return -1000;
   }
 
   if (OneWire::crc8(addr, 7) != addr[7])
   {
-    Serial.println("CRC is not valid!");
+    TRACE();
+    DUMP("CRC is not valid!");
     return -1000;
   }
 
   if (addr[0] != 0x10 && addr[0] != 0x28)
   {
-    Serial.print("Device is not recognized");
+    TRACE();
+    DUMP("Device is not recognized");
     return -1000;
   }
 
@@ -171,61 +178,27 @@ float getTemp()// Leest de temperatuur van de DS18B20 sensor en geeft deze terug
 
 void printTempValue()// Print de gemeten temperatuur naar de Serial Monitor
 { 
+  TRACE();
   float temperature = getTemp();
-  Serial.print("De temperatuur is: ");
-  Serial.print(temperature);
-  Serial.println(" °C");
+  DUMP(temperature);
 }
 
-int bepaalBewateringType(float temperatuur, int bodemStatus)// Functie om type bewatering te bepalen a.d.h.v. temperatuur en bodemstatus
-{
-  // Als temperatuur te laag is (< 5°C), geen bewatering
-  if (temperatuur < TEMP_MIN){
-    return BEWATERING_UIT;
-  }
-  // Als bodem DROOG is
-  if (bodemStatus == STATUS_DROOG){
-    // Als temperatuur > 25°C, dan LANG bewateren
-    if (temperatuur > TEMP_MAX){
-      return BEWATERING_LANG;
-    }
-    // Anders KORT bewateren
-    else{
-      return BEWATERING_KORT;
-    }
-  }
-  // In alle andere gevallen (grond is niet droog), geen bewatering nodig
-  else{
-    return BEWATERING_UIT;
-  }
-}
-
-void zetWaterpompAan(int bewateringsType)// Functie om pomp aan te zetten a.d.h.v. bewateringstype
-{
+void zetWaterpompAan(unsigned long duurtijd) {
+  TRACE();
   digitalWrite(RELAY_PIN, HIGH);
-  huidigeBewatering = BEWATERING_AAN;
-  bewateringType = bewateringsType;
+  pompStatus = POMP_AAN;
   bewateringStartTijd = millis();
-
-  String type = "";
-  if (bewateringsType == BEWATERING_TYPE_KORT){
-    type = "KORT";
-  }
-  else if (bewateringsType == BEWATERING_TYPE_LANG){
-    type = "LANG";
-  }
-  else if (bewateringsType == BEWATERING_TYPE_KNOP){
-    type = "KNOP";
-  }
-  Serial.println("Bewatering AAN - Type: " + type);
+  pompDuur = duurtijd;
+  DUMP(pompStatus);
+  DUMP(pompDuur);   //Hiermee zien we hoe lang de pomp aan gaat (in ms)
 }
 
-void zetWaterpompUit()//Functie om pomp uit te zetten en statussen te 'resetten'
-{
+void zetWaterpompUit() {
+  TRACE();
   digitalWrite(RELAY_PIN, LOW);
-  huidigeBewatering = BEWATERING_UIT;
-  bewateringType = 0;
-  Serial.println("Bewatering UIT");
+  pompStatus = POMP_UIT;
+  pompDuur = 0;
+  DUMP(pompStatus);
 }
 
 void leesSensoren() {
@@ -242,46 +215,27 @@ void leesSensoren() {
   printTempValue();
 }
 
-void controleerBewatering()// Als bewatering al actief is, check of deze gestopt moet worden 
-{  
-  if (huidigeBewatering == BEWATERING_AAN){
-    unsigned long verstrekenTijd = millis() - bewateringStartTijd;
-    bool moetStoppen = false;
-
-    if (bewateringType == BEWATERING_KORT){
-      moetStoppen = verstrekenTijd >= BEWATERING_KORT;
-    }
-    else if (bewateringType == BEWATERING_LANG){
-      moetStoppen = verstrekenTijd >= BEWATERING_LANG;
-    }
-    else if (bewateringType == BEWATERING_KNOP){
-      moetStoppen = verstrekenTijd >= BEWATERING_KNOP;
-    }
-
-    if (moetStoppen) {
+void controleerBewatering() {
+  if (pompStatus == POMP_AAN) {
+    if (millis() - bewateringStartTijd >= pompDuur) {
       zetWaterpompUit();
-      if (bewateringType == BEWATERING_KNOP){
-        knopIngedrukt = false;
-      }
+      knopIngedrukt = false;
     }
     return;
   }
 
-  // Controleer of nieuwe bewatering nodig is
   float temperatuur = getTemp();
-  int prioriteitStatus = bepaalPrioriteit();
-  bewateringType = bepaalBewateringType(temperatuur, prioriteitStatus);
-
-  if (bewateringType != BEWATERING_UIT && !knopIngedrukt) {
-      zetWaterpompAan(bewateringType);
+  int bodemStatus = bepaalPrioriteit();
+  
+  if (temperatuur >= TEMP_MIN && bodemStatus == STATUS_DROOG) {
+    unsigned long duurtijd = (temperatuur > TEMP_MAX) ? BEWATERING_LANG : BEWATERING_KORT; //TERNARY-OPERATOR --> variable = (condition) ? do_when_TRUE : do_when_FALSE;
+    zetWaterpompAan(duurtijd);
   }
 }
 
-void controleerDrukknop()//Functie om pomp aan te zetten indien er op de knop wordt gedrukt 
-{
-  if (digitalRead(BUTTON_PIN) == HIGH && huidigeBewatering == BEWATERING_UIT && !knopIngedrukt) {
+void controleerDrukknop() {
+  if (digitalRead(BUTTON_PIN) == HIGH && pompStatus == POMP_UIT && !knopIngedrukt) {
     knopIngedrukt = true;
-    knopStartTijd = millis();
     zetWaterpompAan(BEWATERING_KNOP);
   }
 }
@@ -302,13 +256,19 @@ void loop()
   // Controleer eerst de drukknop (heeft prioriteit), we plaatsen deze functie hier zodat de drukknop altijd geactiveerd kan worden en niet enkel bij een sensor lezing
   controleerDrukknop();
 
-  // We plaatsen deze functie hier zodat de bewatering continue wordt gecontroleerd en niet enkel bij een sensor lezing
-  controleerBewatering();
+    // Check of de pomp moet stoppen
+  if (pompStatus == POMP_AAN) {
+    if (millis() - bewateringStartTijd >= pompDuur) {
+      zetWaterpompUit();
+      knopIngedrukt = false;
+    }
+  }
 
   // Voer sensormetingen uit om de 15 seconden, verwerk data en toon in seriële monitor
   if (huidigeMillis - LaatsteSensorLezing >= SENSOR_LEES_INTERVAL)
   {
     leesSensoren();
     LaatsteSensorLezing = huidigeMillis;
+    controleerBewatering();
   }
 }
